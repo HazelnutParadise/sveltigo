@@ -1,64 +1,84 @@
 package parse
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-
-	"rogchap.com/v8go"
+	"os"
+	"os/exec"
 )
 
-func ParseSvelte(componentCode string) (string, error) {
-	ctx := v8go.NewContext()
+func downloadCompiler() error {
+	// 創建臨時目錄
+	if err := os.MkdirAll("temp", 0755); err != nil {
+		return err
+	}
 
-	// 添加 structuredClone 的 polyfill
-	polyfillScript := `
-		if (typeof structuredClone === 'undefined') {
-			function structuredClone(obj) {
-				return JSON.parse(JSON.stringify(obj));
-			}
+	// 下載編譯器
+	resp, err := http.Get("https://unpkg.com/svelte@5.1.9/compiler/index.js")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// 保存到臨時文件
+	out, err := os.Create("temp/svelte-compiler.js")
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	return err
+}
+
+func ParseSvelte(content string) (string, error) {
+	// 確保編譯器存在
+	if _, err := os.Stat("temp/svelte-compiler.js"); os.IsNotExist(err) {
+		if err := downloadCompiler(); err != nil {
+			return "", fmt.Errorf("error downloading compiler: %v", err)
 		}
-	`
-	_, err := ctx.RunScript(polyfillScript, "polyfill.js")
+	}
+
+	// 創建臨時的 Svelte 編譯配置
+	config := map[string]interface{}{
+		"generate":   "server",
+		"css":        "injected",
+		"dev":        false,
+		"hydratable": false,
+	}
+
+	configJSON, err := json.Marshal(config)
 	if err != nil {
-		fmt.Println("Error adding polyfill:", err)
 		return "", err
 	}
 
-	// 從 CDN 下載 Svelte 編譯器代碼
-	response, err := http.Get("https://unpkg.com/svelte@5.1.9/compiler/index.js")
-	if err != nil {
-		fmt.Println("Failed to download Svelte compiler:", err)
-		return "", err
-	}
-	defer response.Body.Close()
+	// 準備 Node.js 腳本
+	script := fmt.Sprintf(`
+		const svelte = require('./temp/svelte-compiler.js');
+		const component = %q;
+		const config = %s;
 
-	// 讀取編譯器代碼內容
-	compilerCode, err := io.ReadAll(response.Body)
-	if err != nil {
-		fmt.Println("Failed to read compiler code:", err)
-		return "", err
-	}
+		try {
+			const result = svelte.compile(component, config);
+			console.log(result.js.code);
+		} catch (error) {
+			console.error('Error compiling Svelte component:', error.message);
+			process.exit(1);
+		}
+	`, content, configJSON)
 
-	// 在 V8 執行上下文中執行 Svelte 編譯器代碼
-	_, err = ctx.RunScript(string(compilerCode), "compiler.js")
-	if err != nil {
-		fmt.Println("Error executing Svelte compiler:", err)
-		return "", err
-	}
+	// 執行 Node.js 腳本
+	cmd := exec.Command("node", "-e", script)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
-	// 執行編譯 Svelte 組件的腳本
-	compileScript := fmt.Sprintf(`
-        var compiled = svelte.compile(%q, { generate: "ssr" });
-        compiled.js.code;
-    `, componentCode)
-
-	result, err := ctx.RunScript(compileScript, "compile.js")
-	if err != nil {
-		fmt.Println("Error compiling Svelte component:", err)
-		return "", err
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("compilation error: %v\n%s", err, stderr.String())
 	}
 
-	// 輸出編譯結果
-	return string(result.String()), nil
+	return stdout.String(), nil
 }

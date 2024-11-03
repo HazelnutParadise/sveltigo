@@ -70,7 +70,7 @@ func scopeCSS(content string, componentName string) string {
 				for i, s := range selectors {
 					s = strings.TrimSpace(s)
 					if !strings.HasPrefix(s, "."+componentName) {
-						// 處理多層選擇器
+						// 處理���層選擇器
 						subSelectors := strings.Split(s, " ")
 						for j, sub := range subSelectors {
 							if !strings.HasPrefix(sub, ":") && !strings.HasPrefix(sub, "."+componentName) {
@@ -335,5 +335,8 @@ func AutoParse() (string, error) {
 		return "", err
 	}
 	fmt.Println("編譯結果:", res)
+
+	// 用 node_modules 的 svelte 渲染
+
 	return res, nil
 }

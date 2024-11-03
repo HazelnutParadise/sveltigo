@@ -31,23 +31,19 @@ func main() {
 
 	// 創建 index.html
 	indexHTML := `
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Svelte App</title>
-</head>
-<body>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + Svelte + TS</title>
+  </head>
+  <body>
     <div id="app"></div>
-    <script src="/dist/bundle.js"></script>
-    <script>
-        new App({
-            target: document.getElementById('app')
-        });
-    </script>
-</body>
-</html>`
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+`
 
 	err = os.WriteFile("dist/index.html", []byte(indexHTML), 0644)
 	if err != nil {
@@ -57,10 +53,19 @@ func main() {
 	// 設置路由
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			http.ServeFile(w, r, "dist/index.html")
 			return
 		}
+		// 為 JS 文件設置正確的 MIME 類型
+		if r.URL.Path == "/dist/bundle.js" {
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		}
 		http.FileServer(http.Dir(".")).ServeHTTP(w, r)
+	})
+
+	http.HandleFunc("/src/main.js", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "dist/main.js")
 	})
 
 	fmt.Printf("Server running at http://localhost%s\n", port)
